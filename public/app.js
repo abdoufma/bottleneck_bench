@@ -38,9 +38,10 @@
 
   if (actions.reloadRun) {
     actions.reloadRun.addEventListener("click", () => {
+      const values = readValues();
       const target = new URL(window.location.origin + context.pagePath);
-      target.search = toSearchParams(readValues()).toString();
-      window.location.assign(target);
+      target.search = toSearchParams(values).toString();
+      window.location.assign(target.href);
     });
   }
 
@@ -62,10 +63,10 @@
   }
 
   async function runScenario({ single }) {
+    const values = readValues();
     setBusy(true);
     setStatus(single ? "Running one iteration..." : "Running series...");
     try {
-      const values = readValues();
       if (single) {
         values.iterations = 1;
       }
@@ -86,6 +87,9 @@
           break;
         case "io":
           result = await runIo(values);
+          break;
+        case "react":
+          result = await runReact(values);
           break;
         default:
           throw new Error(`No request runner registered for ${context.id}`);
@@ -390,6 +394,84 @@
     };
   }
 
+  async function runReact(values) {
+    const container = document.getElementById("react-mount-target");
+    if (!container) {
+      throw new Error("React mount target is not available on this page.");
+    }
+    if (typeof React === "undefined" || typeof ReactDOM === "undefined") {
+      throw new Error("React or ReactDOM is not loaded.");
+    }
+
+    const samples = [];
+    for (let iteration = 1; iteration <= values.iterations; iteration += 1) {
+      container.innerHTML = "";
+      const root = ReactDOM.createRoot(container);
+
+      const trees = [];
+      for (let i = 0; i < values.componentCount; i += 1) {
+        trees.push(
+          React.createElement(HeavyNode, {
+            key: i,
+            depth: 0,
+            maxDepth: values.treeDepth,
+            renderCost: values.renderCost,
+          }),
+        );
+      }
+
+      const mountStart = performance.now();
+      ReactDOM.flushSync(() => {
+        root.render(React.createElement("div", null, trees));
+      });
+      const mountMs = performance.now() - mountStart;
+
+      root.unmount();
+      container.innerHTML = "";
+
+      const treeNodes = values.componentCount * (Math.pow(2, values.treeDepth + 1) - 1);
+      const leafNodes = values.componentCount * Math.pow(2, values.treeDepth);
+
+      samples.push({
+        iteration,
+        mountMs: round(mountMs),
+        componentCount: values.componentCount,
+        treeDepth: values.treeDepth,
+        renderCost: values.renderCost,
+        treeNodes,
+        leafNodes,
+      });
+    }
+
+    return {
+      summary: {
+        "Avg mount (ms)": round(mean(samples, "mountMs")),
+        "P95 mount (ms)": percentile(samples.map((sample) => sample.mountMs), 95),
+        "Components": values.componentCount,
+        "Tree depth": values.treeDepth,
+        "Total nodes": samples[0].treeNodes,
+      },
+      samples,
+      raw: samples,
+    };
+  }
+
+  function HeavyNode({ depth, maxDepth, renderCost }) {
+    if (depth >= maxDepth) {
+      let work = 0;
+      for (let i = 0; i < renderCost; i += 1) {
+        work += Math.sin(i) * Math.cos(i);
+      }
+      return React.createElement("span", { className: "react-leaf" }, work.toFixed(2));
+    }
+    return React.createElement(
+      "div",
+      { className: "react-node" },
+      React.createElement(HeavyNode, { depth: depth + 1, maxDepth, renderCost, key: "a" }),
+      React.createElement(HeavyNode, { depth: depth + 1, maxDepth, renderCost, key: "b" }),
+    );
+  }
+
   function renderNodes(count, rows) {
     renderSink.replaceChildren();
     const fragment = document.createDocumentFragment();
@@ -405,10 +487,22 @@
 
   function readValues() {
     const values = {};
-    const data = new FormData(form);
-    for (const [key, value] of data.entries()) {
-      const element = form.elements.namedItem(key);
-      values[key] = element instanceof HTMLInputElement && element.type === "number" ? Number(value) : value;
+    const elements = Array.from(form.elements);
+    for (const element of elements) {
+      if (
+        !(element instanceof HTMLInputElement) &&
+        !(element instanceof HTMLSelectElement) &&
+        !(element instanceof HTMLTextAreaElement)
+      ) {
+        continue;
+      }
+      if (!element.name) {
+        continue;
+      }
+      const key = element.name;
+      const value = element.value;
+      values[key] =
+        element instanceof HTMLInputElement && element.type === "number" ? Number(value) : value;
     }
     return values;
   }

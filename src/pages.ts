@@ -56,6 +56,14 @@ function renderControls(context: ScenarioContext): string {
     .map((field) => renderField(field, context.values[field.name] ?? ""))
     .join("");
 
+  return `
+    <form id="control-form" class="control-panel" data-page-path="${escapeHtml(context.pagePath)}">
+      <div class="control-grid">${fields}</div>
+    </form>
+  `;
+}
+
+function renderActionBar(context: ScenarioContext): string {
   const actionButtons =
     context.mode === "navigation"
       ? `<button type="button" class="action primary" id="reload-run">Reload scenario</button>`
@@ -65,13 +73,12 @@ function renderControls(context: ScenarioContext): string {
         `;
 
   return `
-    <form id="control-form" class="control-panel" data-page-path="${escapeHtml(context.pagePath)}">
-      <div class="control-grid">${fields}</div>
+    <div class="action-bar">
       <div class="action-row">
         ${actionButtons}
         <button type="button" class="action subtle" id="export-results" disabled>Export JSON</button>
       </div>
-    </form>
+    </div>
   `;
 }
 
@@ -252,8 +259,19 @@ export function renderDashboard(runtime: RuntimeConfig): string {
 export function renderBenchmarkPage(context: ScenarioContext): string {
   const contextScript = `<script id="bench-context" type="application/json">${stringifyForScript(context)}</script>`;
   const navigationPayload = context.mode === "navigation" ? renderNavigationPayload(context) : "";
-  const extraHead = context.mode === "navigation" ? navigationPayload.slice(0, navigationPayload.indexOf("<section")) : "";
+  const navigationHead = context.mode === "navigation" ? navigationPayload.slice(0, navigationPayload.indexOf("<section")) : "";
   const navigationBody = context.mode === "navigation" ? navigationPayload.slice(navigationPayload.indexOf("<section")) : "";
+
+  const reactHead = context.id === "react" ? `
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  ` : "";
+
+  const extraHead = navigationHead + reactHead;
+
+  const reactMountContainer = context.id === "react"
+    ? `<div id="react-mount-target" class="react-mount-target"></div>`
+    : "";
 
   const body = `
     <main class="bench-shell">
@@ -279,6 +297,8 @@ export function renderBenchmarkPage(context: ScenarioContext): string {
         </div>
       </header>
 
+      ${renderActionBar(context)}
+
       <section class="bench-layout">
         <aside class="bench-sidebar">
           ${renderControls(context)}
@@ -288,6 +308,7 @@ export function renderBenchmarkPage(context: ScenarioContext): string {
         <section class="bench-main">
           <div class="status-bar" id="status-line">Ready.</div>
           ${renderMetricSkeleton()}
+          ${reactMountContainer}
           <div class="table-shell">
             <table id="samples-table">
               <thead></thead>

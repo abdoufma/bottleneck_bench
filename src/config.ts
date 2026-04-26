@@ -7,7 +7,8 @@ export type BenchmarkId =
   | "file"
   | "db"
   | "js"
-  | "io";
+  | "io"
+  | "react";
 
 export type Preset = "small" | "medium" | "large" | "xlarge";
 
@@ -366,6 +367,52 @@ const IO_FIELDS = (runtime: RuntimeConfig): FieldDefinition[] => [
   },
 ];
 
+const REACT_FIELDS = (runtime: RuntimeConfig): FieldDefinition[] => [
+  {
+    name: "preset",
+    label: "Preset",
+    type: "select",
+    help: "Baseline React mount profile.",
+    options: PRESET_OPTIONS,
+  },
+  {
+    name: "iterations",
+    label: "Iterations",
+    type: "number",
+    min: 1,
+    max: runtime.maxIterations,
+    step: 1,
+    help: "Number of mount-unmount cycles.",
+  },
+  {
+    name: "componentCount",
+    label: "Component count",
+    type: "number",
+    min: 1,
+    max: 500,
+    step: 1,
+    help: "Number of top-level component trees to mount.",
+  },
+  {
+    name: "treeDepth",
+    label: "Tree depth",
+    type: "number",
+    min: 1,
+    max: 12,
+    step: 1,
+    help: "Depth of each component tree (binary branching).",
+  },
+  {
+    name: "renderCost",
+    label: "Render cost",
+    type: "number",
+    min: 0,
+    max: 5000,
+    step: 10,
+    help: "Fake work units executed in each leaf render.",
+  },
+];
+
 function envNumber(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) {
@@ -430,6 +477,11 @@ export function benchmarkCards() {
       title: "Filesystem I/O",
       body: "Local disk read/write timing to isolate non-network I/O bottlenecks.",
     },
+    {
+      href: "/bench/react",
+      title: "React Mount",
+      body: "Mount and unmount heavy React component trees to measure render overhead.",
+    },
   ];
 }
 
@@ -438,8 +490,17 @@ function readString(query: QueryInput, key: string): string | undefined {
   if (typeof raw === "string") {
     return raw;
   }
-  if (Array.isArray(raw) && typeof raw[0] === "string") {
-    return raw[0];
+  if (typeof raw === "number") {
+    return String(raw);
+  }
+  if (Array.isArray(raw)) {
+    const first = raw[0];
+    if (typeof first === "string") {
+      return first;
+    }
+    if (typeof first === "number") {
+      return String(first);
+    }
   }
   return undefined;
 }
@@ -592,6 +653,21 @@ export function resolveScenarioContext(
           "Write-read mode exposes sync disk behavior by writing then immediately reading the same payload.",
         ],
       };
+    case "react":
+      return {
+        id,
+        title: "React Mount",
+        subtitle: "Mount and unmount heavy React component trees to measure render overhead.",
+        pagePath: "/bench/react",
+        mode: "request",
+        primaryMetric: "mountMs",
+        fields: REACT_FIELDS(runtime),
+        values: resolveReactValues(query, runtime),
+        notes: [
+          "Each iteration creates a new React root, mounts a tree, measures time, then unmounts.",
+          "Leaf components perform configurable fake work to simulate expensive renders.",
+        ],
+      };
   }
 }
 
@@ -722,5 +798,23 @@ function resolveIoValues(query: QueryInput, runtime: RuntimeConfig) {
     mode: readEnum(query, "mode", IO_MODE_OPTIONS.map((option) => option.value), defaults.mode),
     iterations: readNumber(query, "iterations", defaults.iterations, 1, runtime.maxIterations),
     fileBytes: readNumber(query, "fileBytes", defaults.fileBytes, 1024, runtime.maxIoBytes),
+  };
+}
+
+function resolveReactValues(query: QueryInput, runtime: RuntimeConfig) {
+  const preset = basePreset(query);
+  const defaultsTable: Record<Preset, { iterations: number; componentCount: number; treeDepth: number; renderCost: number }> = {
+    small: { iterations: 3, componentCount: 10, treeDepth: 4, renderCost: 50 },
+    medium: { iterations: 5, componentCount: 40, treeDepth: 5, renderCost: 200 },
+    large: { iterations: 8, componentCount: 80, treeDepth: 6, renderCost: 500 },
+    xlarge: { iterations: 10, componentCount: 150, treeDepth: 7, renderCost: 1000 },
+  };
+  const defaults = defaultsTable[preset];
+  return {
+    preset,
+    iterations: readNumber(query, "iterations", defaults.iterations, 1, runtime.maxIterations),
+    componentCount: readNumber(query, "componentCount", defaults.componentCount, 1, 500),
+    treeDepth: readNumber(query, "treeDepth", defaults.treeDepth, 1, 12),
+    renderCost: readNumber(query, "renderCost", defaults.renderCost, 0, 5000),
   };
 }

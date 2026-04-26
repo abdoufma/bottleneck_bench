@@ -129,6 +129,9 @@ app.get("/bench/js", (req: Request, res: Response, next: NextFunction) => {
 app.get("/bench/io", (req: Request, res: Response, next: NextFunction) => {
   renderScenarioPage("io", req, res, next);
 });
+app.get("/bench/react", (req: Request, res: Response, next: NextFunction) => {
+  renderScenarioPage("react", req, res, next);
+});
 
 app.get("/api/bench/ping", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -327,7 +330,7 @@ async function renderScenarioPage(
 }
 
 function parseScenario(value: string): BenchmarkId {
-  const scenarios: BenchmarkId[] = ["ping", "page-basic", "page-heavy", "file", "db", "js", "io"];
+  const scenarios: BenchmarkId[] = ["ping", "page-basic", "page-heavy", "file", "db", "js", "io", "react"];
   if (scenarios.includes(value as BenchmarkId)) {
     return value as BenchmarkId;
   }
@@ -358,7 +361,14 @@ function boundedNumber(
   max: number,
 ): number {
   const raw = Array.isArray(value) ? value[0] : value;
-  const parsed = typeof raw === "string" ? Number.parseInt(raw, 10) : Number.NaN;
+  let parsed: number;
+  if (typeof raw === "string") {
+    parsed = Number.parseInt(raw, 10);
+  } else if (typeof raw === "number") {
+    parsed = raw;
+  } else {
+    parsed = Number.NaN;
+  }
   if (!Number.isFinite(parsed)) {
     return fallback;
   }
